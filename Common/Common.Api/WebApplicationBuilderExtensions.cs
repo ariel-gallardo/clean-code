@@ -1,7 +1,11 @@
 ﻿using Common.Application;
 using Common.Infrastructure;
+using Common.Infrastructure.Persistence.Seeds;
+using Common.Infrastructure.Persistence.Seeds.Base;
+using Common.Infrastructure.Persistence.Seeds.Entities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Reflection;
 
@@ -12,6 +16,8 @@ namespace Common.Api
         private static Assembly[] _autoMapperAssemblies = Array.Empty<Assembly>();
         private static Assembly[] _validatorAssemblies = Array.Empty<Assembly>();
         private static Assembly[] _serviceAssemblies = Array.Empty<Assembly>();
+        private static Assembly[] _seederDevAssemblies = Array.Empty<Assembly>();
+        private static Assembly[] _jsonConverterAssemblies = Array.Empty<Assembly>();
         public static WebApplicationBuilder AddAutoMapperAssemblies(this WebApplicationBuilder builder, params Assembly[] assemblies)
         {
             _autoMapperAssemblies = assemblies;
@@ -28,26 +34,52 @@ namespace Common.Api
             _serviceAssemblies = assemblies;
             return builder;
         }
-        public static WebApplication BuildApi<DBContext>(this WebApplicationBuilder builder)  where DBContext : DbContext
+
+        public static WebApplicationBuilder AddJsonConverterAssemblies(this WebApplicationBuilder builder, params Assembly[] assemblies)
         {
-            var env = builder.Environment;
+            _serviceAssemblies = assemblies;
+            return builder;
+        }
 
-            builder.Services.AddInfrastructure<DBContext>(builder.Configuration, env);
+        public static WebApplicationBuilder AddSeederDevelopmentAssemblies(this WebApplicationBuilder builder, params Assembly[] assemblies)
+        {
+            _seederDevAssemblies = assemblies;
+            return builder;
+        }
 
-            builder.Services.AddApplicationAutoMapper(_autoMapperAssemblies);
-            builder.Services.AddApplicationValidators(_validatorAssemblies);
-            builder.Services.AddApplicationServices(_serviceAssemblies);
-            builder.Services.AddApi();
+        private static void UseSeederIfDevelopment(this WebApplication app, IHostEnvironment env)
+        {
+            if (env.IsDevelopment()) 
+            {
+                using var scope = app.Services.CreateScope();
+                var seedRunner = scope.ServiceProvider.GetRequiredService<SeedersRunner>();
+                seedRunner.RunAsync().GetAwaiter().GetResult();
+            }
 
-            var app = builder.Build();
-            app.ConfigureDevelopmentSeeders<DBContext>();
+        }
 
+        private static void UseSwaggerIfDevelopment(this WebApplication app)
+        {
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
             }
+        }
 
+        public static WebApplication BuildApi<DBContext>(this WebApplicationBuilder builder)  where DBContext : DbContext
+        {
+            var env = builder.Environment;
+
+            builder.Services.AddInfrastructure<DBContext>(builder.Configuration, env);
+            builder.Services.AddApplicationAutoMapper(_autoMapperAssemblies);
+            builder.Services.AddApplicationValidators(_validatorAssemblies);
+            builder.Services.AddApplicationServices(_serviceAssemblies);
+            builder.Services.AddApplicationDevelopmentSeeders(env, _seederDevAssemblies);
+            builder.Services.AddApi();
+            var app = builder.Build();
+            app.UseSeederIfDevelopment(env);
+            app.UseSwaggerIfDevelopment();
             app.UseHttpsRedirection();
             app.UseAuthorization();
             app.MapControllers();
